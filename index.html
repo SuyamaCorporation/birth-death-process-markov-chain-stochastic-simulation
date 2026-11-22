@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>生死過程・マルコフ連鎖確率的増減シミュレーション</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0f1a; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    canvas { display: block; border: 1px solid #1e293b; border-radius: 8px; background: #060b14; }
+    input[type=range] { accent-color: #34d399; }
+    .panel { background: rgba(15,23,42,0.85); border: 1px solid #1e293b; border-radius: 8px; }
+    .stat-val { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="min-h-screen p-4">
+  <h1 class="text-2xl font-bold text-emerald-300 text-center mb-1">生死過程・マルコフ連鎖確率的増減シミュレーション</h1>
+  <p class="text-center text-slate-400 text-xs mb-4">Birth-Death Process: dN/dt ≈ (λ − μ)N</p>
+
+  <div class="max-w-3xl mx-auto">
+    <!-- Canvas -->
+    <div class="flex justify-center mb-4">
+      <canvas id="bdCanvas" width="600" height="350" role="img" aria-label="生死過程シミュレーションキャンバス"></canvas>
+    </div>
+
+    <!-- Stats bar -->
+    <div class="panel p-3 mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+      <div>
+        <p class="text-slate-400 text-xs">絶滅した軌跡</p>
+        <p id="stat-extinct" class="stat-val text-red-400 font-bold text-lg">-</p>
+      </div>
+      <div>
+        <p class="text-slate-400 text-xs">絶滅確率（理論値）</p>
+        <p id="stat-extinct-prob" class="stat-val text-orange-300 font-bold text-lg">-</p>
+      </div>
+      <div>
+        <p class="text-slate-400 text-xs">最終平均個体数</p>
+        <p id="stat-mean" class="stat-val text-emerald-300 font-bold text-lg">-</p>
+      </div>
+      <div>
+        <p class="text-slate-400 text-xs">成長率 (λ−μ)</p>
+        <p id="stat-growth" class="stat-val text-blue-300 font-bold text-lg">-</p>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="panel p-4">
+        <h2 class="text-emerald-400 font-bold text-sm mb-3">パラメータ設定</h2>
+        <div class="space-y-3">
+          <div>
+            <label for="lambda-slider" class="text-xs text-slate-400 flex justify-between">
+              <span>誕生率 λ（1個体あたり/時間）</span>
+              <span id="lambda-val" class="text-emerald-300 font-mono stat-val">0.30</span>
+            </label>
+            <input type="range" id="lambda-slider" min="0.00" max="1.00" value="0.30" step="0.01" class="w-full" aria-label="誕生率λのスライダー">
+          </div>
+          <div>
+            <label for="mu-slider" class="text-xs text-slate-400 flex justify-between">
+              <span>死亡率 μ（1個体あたり/時間）</span>
+              <span id="mu-val" class="text-red-300 font-mono stat-val">0.20</span>
+            </label>
+            <input type="range" id="mu-slider" min="0.00" max="1.00" value="0.20" step="0.01" class="w-full" aria-label="死亡率μのスライダー">
+          </div>
+          <div>
+            <label for="n0-slider" class="text-xs text-slate-400 flex justify-between">
+              <span>初期個体数 N₀</span>
+              <span id="n0-val" class="text-blue-300 font-mono stat-val">10</span>
+            </label>
+            <input type="range" id="n0-slider" min="1" max="50" value="10" step="1" class="w-full" aria-label="初期個体数のスライダー">
+          </div>
+          <div>
+            <label for="tmax-slider" class="text-xs text-slate-400 flex justify-between">
+              <span>シミュレーション時間</span>
+              <span id="tmax-val" class="text-slate-300 font-mono stat-val">20</span>
+            </label>
+            <input type="range" id="tmax-slider" min="5" max="50" value="20" step="5" class="w-full" aria-label="シミュレーション時間のスライダー">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel p-4">
+        <h2 class="text-slate-300 font-bold text-sm mb-3">表示設定 / 実行</h2>
+        <div class="space-y-3">
+          <div>
+            <label for="trajectories-slider" class="text-xs text-slate-400 flex justify-between">
+              <span>軌跡の数</span>
+              <span id="trajectories-val" class="text-slate-300 font-mono stat-val">20</span>
+            </label>
+            <input type="range" id="trajectories-slider" min="5" max="50" value="20" step="5" class="w-full" aria-label="軌跡の数のスライダー">
+          </div>
+          <div class="flex items-center gap-3 mt-2">
+            <input type="checkbox" id="show-expected" checked class="w-4 h-4 cursor-pointer accent-yellow-400" aria-label="期待値曲線の表示">
+            <label for="show-expected" class="text-xs text-slate-400 cursor-pointer">期待値曲線を表示</label>
+          </div>
+          <div class="flex items-center gap-3">
+            <input type="checkbox" id="show-extinct" checked class="w-4 h-4 cursor-pointer accent-red-400" aria-label="絶滅軌跡の強調表示">
+            <label for="show-extinct" class="text-xs text-slate-400 cursor-pointer">絶滅軌跡を強調</label>
+          </div>
+        </div>
+
+        <button
+          id="run-btn"
+          onclick="runSimulation()"
+          class="mt-4 w-full py-2.5 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 font-bold text-sm rounded focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          aria-label="シミュレーションを実行する"
+        >
+          ▶ シミュレーション実行
+        </button>
+
+        <!-- Legend -->
+        <div class="mt-4 space-y-1 text-xs text-slate-400">
+          <div class="flex items-center gap-2"><span class="inline-block w-6 h-0.5 bg-green-400 opacity-50"></span>生存軌跡（確率的）</div>
+          <div class="flex items-center gap-2"><span class="inline-block w-6 h-0.5 bg-red-400"></span>絶滅軌跡</div>
+          <div class="flex items-center gap-2"><span class="inline-block w-6 h-0.5 bg-yellow-400" style="border-top:2px dashed #facc15;background:transparent;"></span>期待値 E[N(t)] = N₀e^((λ-μ)t)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Theory info -->
+    <div class="panel p-4 mt-4">
+      <h2 class="text length-slate-300 font-bold text-sm mb-2 text-slate-300">生死過程の理論</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-400">
+        <div class="bg-slate-800 rounded p-2">
+          <p class="font-bold text-emerald-300 mb-1">期待値</p>
+          <p class="font-mono">E[N(t)] = N₀ · e^((λ−μ)t)</p>
+        </div>
+        <div class="bg-slate-800 rounded p-2">
+          <p class="font-bold text-orange-300 mb-1">絶滅確率（λ≠μ）</p>
+          <p class="font-mono">P(ext) = (μ/λ)^N₀  if λ&gt;μ</p>
+          <p class="font-mono">P(ext) = 1  if λ≤μ</p>
+        </div>
+        <div class="bg-slate-800 rounded p-2">
+          <p class="font-bold text-blue-300 mb-1">次のイベント（Gillespie法）</p>
+          <p class="font-mono">τ ~ Exp(N(λ+μ))</p>
+          <p class="font-mono">誕生: p=λ/(λ+μ)</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('bdCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const MARGIN = { top: 20, right: 20, bottom: 40, left: 55 };
+    const PLOT_W = W - MARGIN.left - MARGIN.right;
+    const PLOT_H = H - MARGIN.top - MARGIN.bottom;
+
+    function getParams() {
+      return {
+        lambda: +document.getElementById('lambda-slider').value,
+        mu: +document.getElementById('mu-slider').value,
+        N0: +document.getElementById('n0-slider').value,
+        Tmax: +document.getElementById('tmax-slider').value,
+        numTraj: +document.getElementById('trajectories-slider').value,
+      };
+    }
+
+    // Gillespie exact simulation
+    function simulateTrajectory(lambda, mu, N0, Tmax) {
+      const times = [0];
+      const pops = [N0];
+      let t = 0;
+      let N = N0;
+      const MAX_STEPS = 10000;
+      let steps = 0;
+
+      while (t < Tmax && N > 0 && steps < MAX_STEPS) {
+        const rate = N * (lambda + mu);
+        if (rate <= 0) break;
+        const dt = -Math.log(Math.random()) / rate;
+        t += dt;
+        if (t > Tmax) { times.push(Tmax); pops.push(N); break; }
+        const isBirth = Math.random() < lambda / (lambda + mu);
+        if (isBirth) N++;
+        else N--;
+        times.push(t);
+        pops.push(N);
+        steps++;
+        if (N === 0) { times.push(Tmax); pops.push(0); break; }
+      }
+      if (pops[pops.length - 1] > 0 && times[times.length - 1] < Tmax) {
+        times.push(Tmax);
+        pops.push(pops[pops.length - 1]);
+      }
+      return { times, pops, extinct: N === 0 };
+    }
+
+    function computeExtinctionProb(lambda, mu, N0) {
+      if (lambda <= 0) return 1;
+      if (mu <= 0) return 0;
+      if (lambda <= mu) return 1;
+      return Math.pow(mu / lambda, N0);
+    }
+
+    let lastResults = null;
+
+    function runSimulation() {
+      const { lambda, mu, N0, Tmax, numTraj } = getParams();
+
+      const trajectories = [];
+      for (let i = 0; i < numTraj; i++) {
+        trajectories.push(simulateTrajectory(lambda, mu, N0, Tmax));
+      }
+
+      lastResults = { trajectories, lambda, mu, N0, Tmax };
+
+      const extCount = trajectories.filter(t => t.extinct).length;
+      const finalPops = trajectories.map(t => t.pops[t.pops.length - 1]);
+      const meanFinal = finalPops.reduce((a, b) => a + b, 0) / finalPops.length;
+      const extinctProb = computeExtinctionProb(lambda, mu, N0);
+      const growthRate = lambda - mu;
+
+      document.getElementById('stat-extinct').textContent = extCount + '/' + numTraj;
+      document.getElementById('stat-extinct-prob').textContent = (extinctProb * 100).toFixed(1) + '%';
+      document.getElementById('stat-mean').textContent = meanFinal.toFixed(1);
+      document.getElementById('stat-growth').textContent = (growthRate >= 0 ? '+' : '') + growthRate.toFixed(2);
+      document.getElementById('stat-growth').className = 'stat-val font-bold text-lg ' + (growthRate > 0 ? 'text-green-400' : growthRate < 0 ? 'text-red-400' : 'text-yellow-400');
+
+      drawSimulation(trajectories, lambda, mu, N0, Tmax);
+    }
+
+    function drawSimulation(trajectories, lambda, mu, N0, Tmax) {
+      ctx.clearRect(0, 0, W, H);
+
+      // Find y max
+      let yMax = N0 * 2;
+      trajectories.forEach(t => {
+        const m = Math.max(...t.pops);
+        if (m > yMax) yMax = m;
+      });
+      yMax = Math.max(yMax, N0 + 5);
+
+      function px(t) { return MARGIN.left + (t / Tmax) * PLOT_W; }
+      function py(n) { return MARGIN.top + PLOT_H - (n / yMax) * PLOT_H; }
+
+      // Grid
+      ctx.strokeStyle = 'rgba(30,41,59,0.8)';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i <= 5; i++) {
+        const x = MARGIN.left + (i / 5) * PLOT_W;
+        ctx.beginPath(); ctx.moveTo(x, MARGIN.top); ctx.lineTo(x, MARGIN.top + PLOT_H); ctx.stroke();
+      }
+      for (let i = 0; i <= 5; i++) {
+        const y = MARGIN.top + (i / 5) * PLOT_H;
+        ctx.beginPath(); ctx.moveTo(MARGIN.left, y); ctx.lineTo(MARGIN.left + PLOT_W, y); ctx.stroke();
+      }
+
+      const showExtinct = document.getElementById('show-extinct').checked;
+
+      // Draw trajectories
+      trajectories.forEach(traj => {
+        if (traj.times.length < 2) return;
+        const color = traj.extinct ? (showExtinct ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.3)') : 'rgba(52,211,153,0.35)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = traj.extinct && showExtinct ? 1.5 : 1;
+        ctx.beginPath();
+        for (let i = 0; i < traj.times.length; i++) {
+          const x = px(traj.times[i]);
+          const y = py(traj.pops[i]);
+          if (i === 0) ctx.moveTo(x, y);
+          else {
+            // Step function
+            const prevX = px(traj.times[i - 1]);
+            ctx.lineTo(x, py(traj.pops[i - 1]));
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+      });
+
+      // Expected value curve
+      if (document.getElementById('show-expected').checked) {
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        const steps = 200;
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * Tmax;
+          const en = N0 * Math.exp((lambda - mu) * t);
+          const x = px(t);
+          const y = py(en);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Axes
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(MARGIN.left, MARGIN.top);
+      ctx.lineTo(MARGIN.left, MARGIN.top + PLOT_H);
+      ctx.lineTo(MARGIN.left + PLOT_W, MARGIN.top + PLOT_H);
+      ctx.stroke();
+
+      // Axis labels
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '10px system-ui';
+      ctx.textAlign = 'center';
+      for (let i = 0; i <= 5; i++) {
+        const t = (i / 5) * Tmax;
+        ctx.fillText(t.toFixed(0), px(t), MARGIN.top + PLOT_H + 15);
+      }
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const n = (i / 5) * yMax;
+        ctx.fillText(Math.round(n), MARGIN.left - 5, py(n) + 4);
+      }
+      ctx.textAlign = 'center';
+      ctx.fillText('時間 t', MARGIN.left + PLOT_W / 2, H - 5);
+
+      ctx.save();
+      ctx.translate(12, MARGIN.top + PLOT_H / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('個体数 N', 0, 0);
+      ctx.restore();
+    }
+
+    // Slider listeners
+    ['lambda-slider', 'mu-slider', 'n0-slider', 'tmax-slider', 'trajectories-slider'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('input', () => {
+        const baseId = id.replace('-slider', '');
+        const valEl = document.getElementById(baseId + '-val');
+        if (valEl) {
+          const v = parseFloat(el.value);
+          valEl.textContent = Number.isInteger(v) || el.step === '1' ? v.toFixed(0) : v.toFixed(2);
+        }
+      });
+    });
+
+    ['show-expected', 'show-extinct'].forEach(id => {
+      document.getElementById(id).addEventListener('change', () => {
+        if (lastResults) drawSimulation(lastResults.trajectories, lastResults.lambda, lastResults.mu, lastResults.N0, lastResults.Tmax);
+      });
+    });
+
+    // Initial run
+    runSimulation();
+  </script>
+</body>
+</html>
